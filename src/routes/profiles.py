@@ -1,12 +1,15 @@
-from fastapi import APIRouter, Depends, status, HTTPException, Request
+import os
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, status, HTTPException, Request, Form
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from config import get_jwt_auth_manager, get_s3_storage_client
 from database import get_db, UserModel, UserProfileModel, UserGroupEnum
-from exceptions import BaseSecurityError, S3FileUploadError
-from schemas.profiles import ProfileCreateRequest, ProfileResponseSchema
+from exceptions import BaseSecurityError, BaseS3Error
+from schemas.profiles import ProfileCreateResponseSchema, ProfileCreateRequestSchema
 from security.http import get_token
 from security.interfaces import JWTAuthManagerInterface
 from storages import S3StorageInterface
@@ -33,76 +36,85 @@ async def verify_token_and_get_user_id(
 
 @router.post(
     "/users/{user_id}/profile/",
-    response_model=ProfileResponseSchema,
     status_code=status.HTTP_201_CREATED,
-    summary="Create User Profile",
 )
 async def create_user_profile(
     user_id: int,
-    current_user_id: int = Depends(verify_token_and_get_user_id),
-    profile_data: ProfileCreateRequest = Depends(),
-    db: AsyncSession = Depends(get_db),
-    s3_client: S3StorageInterface = Depends(get_s3_storage_client),
-) -> ProfileResponseSchema:
-    stmt = (
-        select(UserModel)
-        .options(joinedload(UserModel.group))
-        .where(UserModel.id == current_user_id)
-    )
-    result = await db.execute(stmt)
-    current_user = result.scalars().first()
-
-    if current_user_id != user_id and not current_user.has_group(UserGroupEnum.ADMIN):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have permission to edit this profile.",
-        )
-
-    stmt = select(UserModel).where(UserModel.id == user_id)
-    result = await db.execute(stmt)
-    target_user = result.scalars().first()
-
-    if not target_user or not target_user.is_active:
+    profile_data: Annotated[ProfileCreateRequestSchema, Form()],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    token: Annotated[str, Depends(get_token)],
+    jwt_manager: Annotated[JWTAuthManagerInterface, Depends(get_jwt_auth_manager)],
+    s3_client: Annotated[S3StorageInterface, Depends(get_s3_storage_client)],
+) -> ProfileCreateResponseSchema:
+    try:
+        token = jwt_manager.decode_access_token(token)
+    except BaseSecurityError as error:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found or not active.",
+            detail=str(error)
         )
-
-    stmt = select(UserProfileModel).where(UserProfileModel.user_id == user_id)
-    result = await db.execute(stmt)
-    existing_profile = result.scalars().first()
-
-    if existing_profile:
+    current_user = await db.scalar(
+        select(
+            UserModel
+        ).where(
+            UserModel.id == token.get("user_id")
+        ).options(
+            joinedload(UserModel.group),
+        )
+    )
+    if not current_user or not current_user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found or not active."
+        )
+    if not current_user.has_group(UserGroupEnum.ADMIN) and current_user.id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to edit this profile."
+        )
+    user_for_profile = await db.scalar(
+        select(
+            UserModel
+        ).where(
+            UserModel.id == user_id
+        ).options(
+            joinedload(UserModel.profile),
+        )
+    )
+    if user_for_profile.profile:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User already has a profile.",
+            detail="User already has a profile."
         )
-
-    avatar_key = f"avatars/{user_id}_avatar.jpg"
+    _, extension = os.path.splitext(profile_data.avatar.filename)
+    avatar_path = f"avatars/{user_id}_avatar{extension}"
+    file = await profile_data.avatar.read()
     try:
-        avatar_contents = await profile_data.avatar.read()
-        await s3_client.upload_file(avatar_key, avatar_contents)
-    except S3FileUploadError:
+        await s3_client.upload_file(avatar_path, file)
+        avatar_url = await s3_client.get_file_url(avatar_path)
+    except BaseS3Error:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to upload avatar. Please try again later.",
+            detail="Failed to upload avatar. Please try again later."
         )
-
-    new_profile = UserProfileModel(
-        user_id=user_id,
+    profile = UserProfileModel(
         first_name=profile_data.first_name,
         last_name=profile_data.last_name,
         gender=profile_data.gender,
         date_of_birth=profile_data.date_of_birth,
         info=profile_data.info,
-        avatar=avatar_key,
+        avatar=avatar_path,
+        user=user_for_profile,
     )
-
-    db.add(new_profile)
+    db.add(profile)
     await db.commit()
-    await db.refresh(new_profile)
-
-    avatar_url = await s3_client.get_file_url(avatar_key)
-    new_profile.avatar = avatar_url
-
-    return ProfileResponseSchema.model_validate(new_profile)
+    return ProfileCreateResponseSchema(
+        id=profile.id,
+        user_id=profile.user_id,
+        first_name=profile.first_name,
+        last_name=profile.last_name,
+        gender=profile.gender,
+        date_of_birth=profile.date_of_birth,
+        info=profile.info,
+        avatar=avatar_url,
+    )
