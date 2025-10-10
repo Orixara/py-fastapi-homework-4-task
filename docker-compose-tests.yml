@@ -49,9 +49,9 @@ services:
     environment:
       - MINIO_ROOT_USER=minioadmin
       - MINIO_ROOT_PASSWORD=some_password
-      - S3_STORAGE_HOST=minio-theater-test
-      - S3_STORAGE_PORT=9000
-      - S3_BUCKET_NAME=theater-storage
+      - MINIO_HOST=minio-theater-test
+      - MINIO_PORT=9000
+      - MINIO_STORAGE=theater-storage
     volumes:
       - minio_data_test:/data
     healthcheck:
@@ -74,9 +74,9 @@ services:
     environment:
       - MINIO_ROOT_USER=minioadmin
       - MINIO_ROOT_PASSWORD=some_password
-      - S3_STORAGE_HOST=minio-theater-test
-      - S3_STORAGE_PORT=9000
-      - S3_BUCKET_NAME=theater-storage
+      - MINIO_HOST=minio-theater-test
+      - MINIO_PORT=9000
+      - MINIO_STORAGE=theater-storage
     networks:
       - theater_network_test
 
