@@ -49,42 +49,35 @@ async def create_user_profile(
     try:
         token = jwt_manager.decode_access_token(token)
     except BaseSecurityError as error:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(error)
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(error))
     current_user = await db.scalar(
-        select(
-            UserModel
-        ).where(
-            UserModel.id == token.get("user_id")
-        ).options(
+        select(UserModel)
+        .where(UserModel.id == token.get("user_id"))
+        .options(
             joinedload(UserModel.group),
         )
     )
     if not current_user or not current_user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found or not active."
+            detail="User not found or not active.",
         )
     if not current_user.has_group(UserGroupEnum.ADMIN) and current_user.id != user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have permission to edit this profile."
+            detail="You don't have permission to edit this profile.",
         )
     user_for_profile = await db.scalar(
-        select(
-            UserModel
-        ).where(
-            UserModel.id == user_id
-        ).options(
+        select(UserModel)
+        .where(UserModel.id == user_id)
+        .options(
             joinedload(UserModel.profile),
         )
     )
     if user_for_profile.profile:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User already has a profile."
+            detail="User already has a profile.",
         )
     _, extension = os.path.splitext(profile_data.avatar.filename)
     avatar_path = f"avatars/{user_id}_avatar{extension}"
@@ -95,7 +88,7 @@ async def create_user_profile(
     except BaseS3Error:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to upload avatar. Please try again later."
+            detail="Failed to upload avatar. Please try again later.",
         )
     profile = UserProfileModel(
         first_name=profile_data.first_name,
