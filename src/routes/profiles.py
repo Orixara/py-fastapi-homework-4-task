@@ -3,7 +3,16 @@ import os
 from datetime import date
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status, HTTPException, Request, Form, File, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    status,
+    HTTPException,
+    Request,
+    Form,
+    File,
+    UploadFile,
+)
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,8 +38,8 @@ router = APIRouter()
 
 
 async def verify_token_and_get_user_id(
-        request: Request,
-        jwt_manager: JWTAuthManagerInterface = Depends(get_jwt_auth_manager),
+    request: Request,
+    jwt_manager: JWTAuthManagerInterface = Depends(get_jwt_auth_manager),
 ) -> int:
     """
     Helper function to verify token and get user ID.
@@ -55,24 +64,23 @@ async def verify_token_and_get_user_id(
     status_code=status.HTTP_201_CREATED,
 )
 async def create_user_profile(
-        user_id: int,
-        first_name: Annotated[str, Form()],
-        last_name: Annotated[str, Form()],
-        gender: Annotated[str, Form()],
-        date_of_birth: Annotated[date, Form()],
-        info: Annotated[str, Form()],
-        avatar: Annotated[UploadFile, File()],
-        db: Annotated[AsyncSession, Depends(get_db)],
-        token: Annotated[str, Depends(get_token)],
-        jwt_manager: Annotated[JWTAuthManagerInterface, Depends(get_jwt_auth_manager)],
-        s3_client: Annotated[S3StorageInterface, Depends(get_s3_storage_client)],
+    user_id: int,
+    first_name: Annotated[str, Form()],
+    last_name: Annotated[str, Form()],
+    gender: Annotated[str, Form()],
+    date_of_birth: Annotated[date, Form()],
+    info: Annotated[str, Form()],
+    avatar: Annotated[UploadFile, File()],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    token: Annotated[str, Depends(get_token)],
+    jwt_manager: Annotated[JWTAuthManagerInterface, Depends(get_jwt_auth_manager)],
+    s3_client: Annotated[S3StorageInterface, Depends(get_s3_storage_client)],
 ) -> ProfileCreateResponseSchema:
     try:
         decoded_token = jwt_manager.decode_access_token(token)
     except BaseSecurityError:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token has expired."
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has expired."
         )
 
     current_user = await db.scalar(
@@ -138,7 +146,9 @@ async def create_user_profile(
         content_type = "application/octet-stream"
 
     try:
-        await s3_client.upload_file(avatar_path, file_content, content_type=content_type)
+        await s3_client.upload_file(
+            avatar_path, file_content, content_type=content_type
+        )
         avatar_url = await s3_client.get_file_url(avatar_path)
     except BaseS3Error:
         raise HTTPException(

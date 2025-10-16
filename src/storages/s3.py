@@ -40,7 +40,7 @@ class S3StorageClient(S3StorageInterface):
         self,
         file_name: str,
         file_data: Union[bytes, bytearray],
-        content_type: str = "application/octet-stream"  # FIXED: Accept content_type parameter
+        content_type: str = "application/octet-stream",  # FIXED: Accept content_type parameter
     ) -> None:
         """
         Asynchronously upload a file to the S3-compatible storage.

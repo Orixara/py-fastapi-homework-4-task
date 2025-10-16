@@ -52,9 +52,7 @@ def validate_gender(gender: str) -> None:
     """
     valid_genders = [g.value for g in GenderEnum]
     if gender not in valid_genders:
-        raise ValueError(
-            f"Gender must be one of: {', '.join(valid_genders)}"
-        )
+        raise ValueError(f"Gender must be one of: {', '.join(valid_genders)}")
 
 
 def validate_birth_date(birth_date: date) -> None:

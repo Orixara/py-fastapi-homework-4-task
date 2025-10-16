@@ -378,9 +378,13 @@ async def reset_password(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid email or token."
         )
 
-    stmt = select(PasswordResetTokenModel).filter_by(user_id=user.id).where(
-        PasswordResetTokenModel.token == data.token,
-        PasswordResetTokenModel.expires_at > func.now()
+    stmt = (
+        select(PasswordResetTokenModel)
+        .filter_by(user_id=user.id)
+        .where(
+            PasswordResetTokenModel.token == data.token,
+            PasswordResetTokenModel.expires_at > func.now(),
+        )
     )
     result = await db.execute(stmt)
     token_record = result.scalars().first()
