@@ -378,18 +378,25 @@ async def reset_password(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid email or token."
         )
 
-    stmt = (
-        select(PasswordResetTokenModel)
-        .filter_by(user_id=user.id)
-        .where(
-            PasswordResetTokenModel.token == data.token,
-            PasswordResetTokenModel.expires_at > func.now(),
-        )
-    )
+    stmt = select(PasswordResetTokenModel).filter_by(user_id=user.id, token=data.token)
     result = await db.execute(stmt)
     token_record = result.scalars().first()
 
     if not token_record:
+        await db.execute(
+            delete(PasswordResetTokenModel).where(
+                PasswordResetTokenModel.user_id == user.id
+            )
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid email or token."
+        )
+
+    expires_at = cast(datetime, token_record.expires_at).replace(tzinfo=timezone.utc)
+    if expires_at < datetime.now(timezone.utc):
+        await db.delete(token_record)
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid email or token."
         )

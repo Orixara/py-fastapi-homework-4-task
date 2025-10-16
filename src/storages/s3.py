@@ -1,3 +1,4 @@
+from io import BytesIO
 from typing import Union
 
 import aioboto3
@@ -55,6 +56,8 @@ class S3StorageClient(S3StorageInterface):
             S3FileUploadError: If the file upload fails due to a BotoCore error.
         """
         try:
+            if isinstance(file_data, (bytes, bytearray)):
+                file_data = BytesIO(file_data)
             async with self._session.client(
                 "s3", endpoint_url=self._endpoint_url
             ) as client:

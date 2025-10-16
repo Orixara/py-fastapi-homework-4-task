@@ -13,7 +13,6 @@ from fastapi import (
     File,
     UploadFile,
 )
-from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
@@ -51,12 +50,51 @@ async def verify_token_and_get_user_id(
         decoded = jwt_manager.decode_access_token(token)
         current_user_id = decoded.get("user_id")
     except BaseSecurityError:
-        # FIXED: Return exact error message
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has expired."
         )
 
     return current_user_id
+
+
+def validated_name(v: str) -> str:
+    try:
+        validate_name(v)
+        return v.lower()
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+def validated_gender(v: str) -> str:
+    try:
+        validate_gender(v)
+        return v
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+def validated_birth_date(v: date) -> date:
+    try:
+        validate_birth_date(v)
+        return v
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+def validated_info(v: str) -> str:
+    try:
+        validate_info(v)
+        return v
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+def validated_avatar(v: UploadFile) -> UploadFile:
+    try:
+        validate_image(v)
+        return v
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 @router.post(
@@ -76,6 +114,13 @@ async def create_user_profile(
     jwt_manager: Annotated[JWTAuthManagerInterface, Depends(get_jwt_auth_manager)],
     s3_client: Annotated[S3StorageInterface, Depends(get_s3_storage_client)],
 ) -> ProfileCreateResponseSchema:
+    first_name = validated_name(first_name)
+    last_name = validated_name(last_name)
+    gender = validated_gender(gender)
+    date_of_birth = validated_birth_date(date_of_birth)
+    info = validated_info(info)
+    avatar = validated_avatar(avatar)
+
     try:
         decoded_token = jwt_manager.decode_access_token(token)
     except BaseSecurityError:
@@ -119,27 +164,14 @@ async def create_user_profile(
             detail="User already has a profile.",
         )
 
-    try:
-        validate_name(first_name)
-        validate_name(last_name)
-        validate_gender(gender)
-        validate_birth_date(date_of_birth)
-        validate_info(info)
-        validate_image(avatar)
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
-        )
-
     _, extension = os.path.splitext(avatar.filename or "")
     if not extension:
-        extension = ".jpg"  # fallback
+        extension = ".jpg"
 
     avatar_path = f"avatars/{user_id}_avatar{extension}"
 
-    await avatar.seek(0)
-    file_content = await avatar.read()
+    avatar.file.seek(0)
+    file_content = avatar.file.read()
 
     content_type = mimetypes.guess_type(avatar.filename or "")[0]
     if not content_type:
@@ -157,8 +189,8 @@ async def create_user_profile(
         )
 
     profile = UserProfileModel(
-        first_name=first_name.lower(),
-        last_name=last_name.lower(),
+        first_name=first_name,
+        last_name=last_name,
         gender=GenderEnum(gender),
         date_of_birth=date_of_birth,
         info=info,
