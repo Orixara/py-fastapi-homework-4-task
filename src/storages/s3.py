@@ -37,7 +37,10 @@ class S3StorageClient(S3StorageInterface):
         )
 
     async def upload_file(
-        self, file_name: str, file_data: Union[bytes, bytearray]
+        self,
+        file_name: str,
+        file_data: Union[bytes, bytearray],
+        content_type: str = "application/octet-stream"  # FIXED: Accept content_type parameter
     ) -> None:
         """
         Asynchronously upload a file to the S3-compatible storage.
@@ -45,6 +48,7 @@ class S3StorageClient(S3StorageInterface):
         Args:
             file_name (str): The name of the file to be stored.
             file_data (Union[bytes, bytearray]): The file data in bytes.
+            content_type (str): The MIME type of the file. Defaults to "application/octet-stream".
 
         Raises:
             S3ConnectionError: If there is a connection error with S3.
@@ -58,7 +62,7 @@ class S3StorageClient(S3StorageInterface):
                     Bucket=self._bucket_name,
                     Key=file_name,
                     Body=file_data,
-                    ContentType="image/jpeg",
+                    ContentType=content_type,
                 )
         except (ConnectionError, HTTPClientError, NoCredentialsError) as e:
             raise S3ConnectionError(f"Failed to connect to S3 storage: {str(e)}") from e

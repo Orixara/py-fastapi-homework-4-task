@@ -1,8 +1,8 @@
 from datetime import datetime, timezone
 from typing import cast
 
-from fastapi import APIRouter, Depends, status, HTTPException, BackgroundTasks
-from sqlalchemy import select, delete
+from fastapi import APIRouter, Depends, status, HTTPException, BackgroundTasks, Request
+from sqlalchemy import select, delete, func
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
@@ -70,6 +70,7 @@ router = APIRouter()
 )
 async def register_user(
     user_data: UserRegistrationRequestSchema,
+    request: Request,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     email_sender: EmailSenderInterface = Depends(get_accounts_email_notificator),
@@ -132,9 +133,9 @@ async def register_user(
             detail="An error occurred during user creation.",
         ) from e
     else:
-
+        base_url = str(request.base_url).rstrip("/")
         activation_link = (
-            f"http://127.0.0.1:8000/api/v1/accounts/activate/"
+            f"{base_url}/api/v1/accounts/activate/"
             f"?email={user_data.email}&token={activation_token.token}"
         )
         background_tasks.add_task(
@@ -175,6 +176,7 @@ async def register_user(
 )
 async def activate_account(
     activation_data: UserActivationRequestSchema,
+    request: Request,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     email_sender: EmailSenderInterface = Depends(get_accounts_email_notificator),
@@ -206,20 +208,13 @@ async def activate_account(
         .where(
             UserModel.email == activation_data.email,
             ActivationTokenModel.token == activation_data.token,
+            ActivationTokenModel.expires_at > func.now(),
         )
     )
     result = await db.execute(stmt)
     token_record = result.scalars().first()
 
-    now_utc = datetime.now(timezone.utc)
-    if (
-        not token_record
-        or cast(datetime, token_record.expires_at).replace(tzinfo=timezone.utc)
-        < now_utc
-    ):
-        if token_record:
-            await db.delete(token_record)
-            await db.commit()
+    if not token_record:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired activation token.",
@@ -236,7 +231,8 @@ async def activate_account(
     await db.delete(token_record)
     await db.commit()
 
-    login_link = "http://127.0.0.1:8000/api/v1/accounts/login/"
+    base_url = str(request.base_url).rstrip("/")
+    login_link = f"{base_url}/api/v1/accounts/login/"
     background_tasks.add_task(
         email_sender.send_activation_complete_email,
         str(activation_data.email),
@@ -258,6 +254,7 @@ async def activate_account(
 )
 async def request_password_reset_token(
     data: PasswordResetRequestSchema,
+    request: Request,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     email_sender: EmailSenderInterface = Depends(get_accounts_email_notificator),
@@ -294,8 +291,9 @@ async def request_password_reset_token(
     db.add(reset_token)
     await db.commit()
 
+    base_url = str(request.base_url).rstrip("/")
     reset_link = (
-        f"http://127.0.0.1:8000/api/v1/accounts/reset-password/complete/"
+        f"{base_url}/api/v1/accounts/reset-password/complete/"
         f"?email={data.email}&token={reset_token.token}"
     )
     background_tasks.add_task(
@@ -348,6 +346,7 @@ async def request_password_reset_token(
 )
 async def reset_password(
     data: PasswordResetCompleteRequestSchema,
+    request: Request,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     email_sender: EmailSenderInterface = Depends(get_accounts_email_notificator),
@@ -379,29 +378,21 @@ async def reset_password(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid email or token."
         )
 
-    stmt = select(PasswordResetTokenModel).filter_by(user_id=user.id)
+    stmt = select(PasswordResetTokenModel).filter_by(user_id=user.id).where(
+        PasswordResetTokenModel.token == data.token,
+        PasswordResetTokenModel.expires_at > func.now()
+    )
     result = await db.execute(stmt)
     token_record = result.scalars().first()
 
-    if not token_record or token_record.token != data.token:
-        if token_record:
-            await db.run_sync(lambda s: s.delete(token_record))
-            await db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid email or token."
-        )
-
-    expires_at = cast(datetime, token_record.expires_at).replace(tzinfo=timezone.utc)
-    if expires_at < datetime.now(timezone.utc):
-        await db.run_sync(lambda s: s.delete(token_record))
-        await db.commit()
+    if not token_record:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid email or token."
         )
 
     try:
         user.password = data.password
-        await db.run_sync(lambda s: s.delete(token_record))
+        await db.delete(token_record)
         await db.commit()
     except SQLAlchemyError:
         await db.rollback()
@@ -410,7 +401,8 @@ async def reset_password(
             detail="An error occurred while resetting the password.",
         )
 
-    login_link = "http://127.0.0.1:8000/api/v1/accounts/login/"
+    base_url = str(request.base_url).rstrip("/")
+    login_link = f"{base_url}/api/v1/accounts/login/"
     background_tasks.add_task(
         email_sender.send_password_reset_complete_email, str(data.email), login_link
     )
